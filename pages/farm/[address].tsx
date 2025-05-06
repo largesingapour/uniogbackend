@@ -191,17 +191,29 @@ export default function FarmDetailsPage() {
             // --- Calculate Start/End Dates ---
             let farmEndTime: Date | undefined;
             let farmStartTime: Date | undefined;
-            let durationSeconds: number | undefined;
+            let lockDurationSeconds: ethers.BigNumber | undefined;
+            
             try {
-                if (typeof farmContract.duration === 'function') {
-                    durationSeconds = (await farmContract.duration()).toNumber();
+                // Try to get lock duration - this replaces the previous 'duration' call
+                // First check for lockDuration() function
+                if (typeof farmContract.lockDuration === 'function') {
+                    lockDurationSeconds = await farmContract.lockDuration();
+                } 
+                // Then check for lockDurationSeconds() as an alternative
+                else if (typeof farmContract.lockDurationSeconds === 'function') {
+                    lockDurationSeconds = await farmContract.lockDurationSeconds();
                 }
+                
                 const endTimestampSeconds = decodedValues[7].toNumber();
                 farmEndTime = new Date(endTimestampSeconds * 1000);
-                if (durationSeconds && durationSeconds > 0) {
-                    farmStartTime = new Date((endTimestampSeconds - durationSeconds) * 1000);
+                
+                // Calculate start time if we have lock duration
+                if (lockDurationSeconds && !lockDurationSeconds.isZero()) {
+                    farmStartTime = new Date((endTimestampSeconds - lockDurationSeconds.toNumber()) * 1000);
                 }
-            } catch (e) { console.error("Could not read farm duration/timestamps"); }
+            } catch (e) { 
+                console.error("Could not read farm duration/timestamps:", e); 
+            }
 
             const fetchedFarmData: DecodedFarmData = {
                 stakeTokenAddress: stakeTokenAddr,
@@ -218,6 +230,7 @@ export default function FarmDetailsPage() {
                 rewardTokenDecimals: rewardTokenInfo?.decimals ?? undefined,
                 farmEndTime: farmEndTime,
                 farmStartTime: farmStartTime,
+                lockDurationSeconds: lockDurationSeconds
             };
             setFarmData(fetchedFarmData);
 
@@ -226,95 +239,104 @@ export default function FarmDetailsPage() {
                  console.log(`Fetching user info for ${connectedAddress}...`);
                  const stakeTokenContract = new ethers.Contract(fetchedFarmData.stakeTokenAddress, ERC20_ABI, provider);
                  
-                 // Call getUserStake instead of userInfo with safe handling
-                 const userStakeResult = await safeContractCall(
-                     () => farmContract.getUserStake(connectedAddress),
-                     { amount: ethers.BigNumber.from(0), lockEndTime: ethers.BigNumber.from(0) }
-                 );
+                 // Try different methods to get user stake data
+                 let userStakeResult;
+                 let userRewardDebt;
                  
-                 console.log("Result from getUserStake call:", userStakeResult);
+                 try {
+                     // Try to get user stake info with fallbacks
+                     userStakeResult = await safeContractCall(
+                         async () => {
+                             try {
+                                 // If userInfo exists, use it as our primary method
+                                 if (typeof farmContract.userInfo === 'function') {
+                                     const userInfoResult = await farmContract.userInfo(connectedAddress);
+                                     // Different possible formats based on contract version
+                                     return {
+                                         amount: userInfoResult.amount || userInfoResult[0] || ethers.BigNumber.from(0),
+                                         lockEndTime: userInfoResult.lockEndTime || userInfoResult[2] || ethers.BigNumber.from(0)
+                                     };
+                                 }
+                                 // Try getUserStake as fallback
+                                 else if (typeof farmContract.getUserStake === 'function') {
+                                     return await farmContract.getUserStake(connectedAddress);
+                                 }
+                                 throw new Error("No compatible method found to get user stake info");
+                             } catch (e) {
+                                 console.log('Initial user info check failed:', e);
+                                 throw e; // Let the safeContractCall handle retries
+                             }
+                         },
+                         { amount: ethers.BigNumber.from(0), lockEndTime: ethers.BigNumber.from(0) }
+                     );
+                     
+                     console.log("User stake result:", userStakeResult);
+                     setCurrentLockEndTime(userStakeResult.lockEndTime);
+                     
+                     // Check if the stake is locked and calculate time remaining if needed
+                     const now = Math.floor(Date.now() / 1000);
+                     setIsStakeLocked(userStakeResult.lockEndTime.gt(now) && !userStakeResult.amount.isZero());
 
-                 // Get earned rewards with safe handling
-                 const userRewardDebt = await safeContractCall(
-                     () => farmContract.earned(connectedAddress),
-                     ethers.BigNumber.from(0)
-                 );
-                 
-                 // Extract values from getUserStake result
-                 const userStaked = userStakeResult ? userStakeResult.amount : ethers.BigNumber.from(0);
-                 const userLockEndTime = userStakeResult ? userStakeResult.lockEndTime : ethers.BigNumber.from(0);
+                     // Get pending rewards - using getPendingRewards instead of earned
+                     const pendingRewards = await safeContractCall(
+                         async () => {
+                             try {
+                                 // Try getPendingRewards first (from new ABI)
+                                 if (typeof farmContract.getPendingRewards === 'function') {
+                                     return await farmContract.getPendingRewards(connectedAddress);
+                                 }
+                                 // Fall back to earned if it exists (from old ABI)
+                                 else if (typeof farmContract.earned === 'function') {
+                                     return await farmContract.earned(connectedAddress);
+                                 }
+                                 throw new Error("No compatible method found to get pending rewards");
+                             } catch (err) {
+                                 console.log('Failed to get pending rewards:', err);
+                                 throw err; // Let safeContractCall handle retries
+                             }
+                         },
+                         ethers.BigNumber.from(0)
+                     );
+                     setEstimatedClaimableRewards(pendingRewards);
 
-                 // Fetch balance and allowance in parallel with safe handling
-                 const [userBalance, currentAllowance] = await Promise.all([
-                     safeContractCall(
-                         () => stakeTokenContract.balanceOf(connectedAddress),
-                         ethers.BigNumber.from(0)
-                     ),
-                     safeContractCall(
-                         () => stakeTokenContract.allowance(connectedAddress, farmAddress),
-                         ethers.BigNumber.from(0)
-                     )
-                 ]);
-                 
-                 const fetchedUserData: DecodedUserData = {
-                    stakedAmount: userStaked,
-                    rewardDebt: userRewardDebt,
-                    stakeTokenBalance: userBalance,
-                    stakeTokenAllowance: currentAllowance
-                    // We could add lockEndTime here if needed for display
-                 };
-                 setUserData(fetchedUserData);
-                 console.log("Fetched User Data:", fetchedUserData);
-                 
-                 // Check if approval is needed for the current stakeAmount input
-                 if (stakeAmount && fetchedFarmData.stakeTokenDecimals && parseFloat(stakeAmount) > 0) {
-                    try {
-                        const stakeAmountWei = ethers.utils.parseUnits(stakeAmount, fetchedFarmData.stakeTokenDecimals);
-                        setNeedsStakeApproval(currentAllowance.lt(stakeAmountWei));
-                    } catch {
-                        console.warn("Could not parse stake amount for allowance check");
-                        setNeedsStakeApproval(true);
-                    }
-                 } else {
+                     // Fetch token balances and allowances
+                     const [balance, allowance] = await Promise.all([
+                         stakeTokenContract.balanceOf(connectedAddress),
+                         stakeTokenContract.allowance(connectedAddress, farmAddress)
+                     ]);
+
+                     setUserData({
+                         stakedAmount: userStakeResult.amount,
+                         rewardDebt: ethers.BigNumber.from(0), // This may not be directly accessible
+                         stakeTokenBalance: balance,
+                         stakeTokenAllowance: allowance
+                     });
+
+                     // Determine if approval is needed for staking
+                     setNeedsStakeApproval(balance.gt(0) && allowance.isZero());
+
+                 } catch (e) {
+                     console.error("Error fetching user data:", e);
+                     setUserData(null);
                      setNeedsStakeApproval(false);
                  }
-
-                 // Set initial estimated rewards based on fetched data
-                 const initialEstimate = calculateEstimatedRewards(
-                    userStaked,
-                    fetchedFarmData.rewardRatePerSecond,
-                    fetchedFarmData.lastUpdateTimestamp,
-                    fetchedFarmData.endTimestamp,
-                    userRewardDebt
-                 );
-                 setEstimatedClaimableRewards(initialEstimate);
-
-                 setCurrentLockEndTime(userLockEndTime); // Store lock end time in state
-                 const nowSeconds = Math.floor(Date.now() / 1000);
-                 setIsStakeLocked(userLockEndTime.gt(nowSeconds)); // Check if currently locked
-
-            } else {
-                 setUserData(null); // Clear user data if not connected or stake token invalid
-                 setCurrentLockEndTime(null); // Clear lock info if not connected
-                 setIsStakeLocked(false);
             }
 
-        } catch (err: any) {
-            console.error("Failed to load farm data:", err);
-            setError(`Failed to load farm data: ${err.message || err}`);
+        } catch (e: any) {
+            console.error("Error loading farm data:", e);
+            setError(`Failed to load farm data: ${e.message || "Unknown error"}`);
             setFarmData(null);
-            setUserData(null);
         } finally {
             setIsLoading(false);
         }
-    }, [farmAddress, stakeAmount, isConnected, connectedAddress, getProvider]);
+    }, [farmAddress, isConnected, connectedAddress]);
 
-    // --- Load data on farm address change, wallet connection, and account change ---
+    // --- Load Data on Farm Address Change or Connection Change ---
     useEffect(() => {
         if (farmAddress) {
             loadData();
         }
-    }, [farmAddress, loadData, connectedAddress, chainId]);
+    }, [farmAddress, loadData, isConnected, connectedAddress, chainId]);
 
     // --- Approve, Stake, Claim, and Unstake functions ---
     const handleApproveStake = async () => {
@@ -355,108 +377,206 @@ export default function FarmDetailsPage() {
     };
 
     const handleStake = async () => {
-        if (!farmAddress || !farmData?.stakeTokenDecimals || !isConnected || !walletClient || !connectedAddress) {
-            console.error("Cannot stake: Missing data or not connected");
+        if (!farmAddress || !isConnected || !connectedAddress || !stakeAmount || !isCorrectNetwork) {
+            setError("Cannot stake: Either not connected, wrong network, or missing stake amount.");
+            return;
+        }
+
+        if (!farmData || !farmData.stakeTokenDecimals) {
+            setError("Cannot stake: Farm data or token decimals not loaded.");
+            return;
+        }
+
+        // Check if stake amount is valid
+        let amountToStake: ethers.BigNumber;
+        try {
+            amountToStake = ethers.utils.parseUnits(stakeAmount, farmData.stakeTokenDecimals);
+            if (amountToStake.isZero()) throw new Error("Stake amount must be greater than zero");
+        } catch (err: any) {
+            setError(`Invalid stake amount: ${err.message}`);
+            return;
+        }
+
+        // Check if balance is sufficient
+        if (!userData || userData.stakeTokenBalance.lt(amountToStake)) {
+            setError("Insufficient balance for staking.");
+            return;
+        }
+
+        // Check if approval is sufficient
+        if (userData.stakeTokenAllowance.lt(amountToStake)) {
+            setError("Please approve the farm to use your tokens first.");
+            setNeedsStakeApproval(true);
             return;
         }
 
         setIsStaking(true);
-        setStakeTxHash("");
         setError("");
+        setStakeTxHash("");
 
         try {
-            // Parse amount to stake from input
-            const amountToStake = ethers.utils.parseUnits(stakeAmount, farmData.stakeTokenDecimals);
-            const provider = getProvider();
-            const signer = provider.getSigner(connectedAddress);
+            const signer = getProvider().getSigner();
             const farmContract = new ethers.Contract(farmAddress, CURRENT_FARM_IMPLEMENTATION_ABI, signer);
             
-            console.log(`Staking ${amountToStake.toString()} tokens in farm ${farmAddress}`);
+            console.log(`Staking ${amountToStake.toString()} tokens to farm ${farmAddress}`);
+            
+            // Verify stake function exists before calling it
+            if (typeof farmContract.stake !== 'function') {
+                throw new Error("Stake function not found on contract. Check the contract ABI.");
+            }
+            
             const tx = await farmContract.stake(amountToStake);
             setStakeTxHash(tx.hash);
-            
             await tx.wait();
-            console.log(`Stake successful: ${tx.hash}`);
-            setStakeAmount(""); // Clear input
-            // Refresh data to show updated stake
+            
+            console.log("Stake successful:", tx.hash);
+            setStakeAmount(""); // Reset input field
+            
+            // Reload data to show updated state
             await loadData();
+            
         } catch (err: any) {
-            console.error("Stake failed:", err);
-            setError(`Failed to stake tokens: ${err.message || err}`);
+            console.error("Staking failed:", err);
+            setError(`Staking failed: ${err.reason || err.message}`);
         } finally {
             setIsStaking(false);
         }
     };
 
     const handleClaim = async () => {
-        if (!farmAddress || !isConnected || !walletClient || !connectedAddress) {
-            console.error("Cannot claim: Not connected");
+        if (!farmAddress || !isConnected || !connectedAddress || !isCorrectNetwork) {
+            setError("Cannot claim: Either not connected or wrong network.");
             return;
         }
 
         setIsClaiming(true);
-        setClaimTxHash("");
         setError("");
+        setClaimTxHash("");
 
         try {
-            const provider = getProvider();
-            const signer = provider.getSigner(connectedAddress);
+            const signer = getProvider().getSigner();
             const farmContract = new ethers.Contract(farmAddress, CURRENT_FARM_IMPLEMENTATION_ABI, signer);
             
             console.log(`Claiming rewards from farm ${farmAddress}`);
+            
+            // Verify claim function exists before calling it
+            if (typeof farmContract.claim !== 'function') {
+                throw new Error("Claim function not found on contract. Check the contract ABI.");
+            }
+            
             const tx = await farmContract.claim();
             setClaimTxHash(tx.hash);
-            
             await tx.wait();
-            console.log(`Claim successful: ${tx.hash}`);
-            // Refresh data to show updated rewards
+            
+            console.log("Claim successful:", tx.hash);
+            
+            // Reload data to show updated state
             await loadData();
+            
         } catch (err: any) {
-            console.error("Claim failed:", err);
-            setError(`Failed to claim rewards: ${err.message || err}`);
+            console.error("Claiming failed:", err);
+            setError(`Claiming failed: ${err.reason || err.message}`);
         } finally {
             setIsClaiming(false);
         }
     };
 
     const handleUnstake = async () => {
-        if (!farmAddress || !farmData?.stakeTokenDecimals || !isConnected || !walletClient || !connectedAddress) {
-            console.error("Cannot unstake: Missing data or not connected");
+        if (!farmAddress || !isConnected || !connectedAddress || !unstakeAmount || !isCorrectNetwork) {
+            setError("Cannot unstake: Either not connected, wrong network, or missing unstake amount.");
+            return;
+        }
+
+        if (!farmData || !farmData.stakeTokenDecimals) {
+            setError("Cannot unstake: Farm data or token decimals not loaded.");
+            return;
+        }
+
+        // Check if stake is currently locked
+        if (isStakeLocked) {
+            const now = Math.floor(Date.now() / 1000);
+            const unlockTime = currentLockEndTime?.toNumber() || 0;
+            const remainingSeconds = unlockTime - now;
+            
+            if (remainingSeconds > 0) {
+                const days = Math.floor(remainingSeconds / 86400);
+                const hours = Math.floor((remainingSeconds % 86400) / 3600);
+                const minutes = Math.floor((remainingSeconds % 3600) / 60);
+                
+                setError(`Cannot unstake: Stake is locked for ${days}d ${hours}h ${minutes}m`);
+                return;
+            }
+        }
+
+        // Check if unstake amount is valid
+        let amountToUnstake: ethers.BigNumber;
+        try {
+            amountToUnstake = ethers.utils.parseUnits(unstakeAmount, farmData.stakeTokenDecimals);
+            if (amountToUnstake.isZero()) throw new Error("Unstake amount must be greater than zero");
+        } catch (err: any) {
+            setError(`Invalid unstake amount: ${err.message}`);
+            return;
+        }
+
+        // Check if staked balance is sufficient
+        if (!userData || userData.stakedAmount.lt(amountToUnstake)) {
+            setError("Insufficient staked balance for unstaking.");
             return;
         }
 
         setIsUnstaking(true);
-        setUnstakeTxHash("");
         setError("");
+        setUnstakeTxHash("");
 
         try {
-            // Parse amount to unstake from input
-            const amountToUnstake = ethers.utils.parseUnits(unstakeAmount, farmData.stakeTokenDecimals);
-            const provider = getProvider();
-            const signer = provider.getSigner(connectedAddress);
+            const signer = getProvider().getSigner();
             const farmContract = new ethers.Contract(farmAddress, CURRENT_FARM_IMPLEMENTATION_ABI, signer);
+            
+            // Get up-to-date user stake data
+            let currentStake;
+            try {
+                // Try to get current stake data with both methods
+                if (typeof farmContract.getUserStake === 'function') {
+                    currentStake = await farmContract.getUserStake(connectedAddress);
+                } else if (typeof farmContract.userInfo === 'function') {
+                    const userInfo = await farmContract.userInfo(connectedAddress);
+                    currentStake = {
+                        amount: userInfo.amount || userInfo[0] || ethers.BigNumber.from(0),
+                        lockEndTime: userInfo.lockEndTime || userInfo[2] || ethers.BigNumber.from(0)
+                    };
+                } else {
+                    throw new Error("No method found to check current stake");
+                }
+                
+                // Check if the stake is locked
+                const now = Math.floor(Date.now() / 1000);
+                if (currentStake.lockEndTime && currentStake.lockEndTime.gt(now)) {
+                    throw new Error(`Stake is locked until ${new Date(currentStake.lockEndTime.toNumber() * 1000).toLocaleString()}`);
+                }
+            } catch (err: any) {
+                throw new Error(`Failed to check stake status: ${err.message}`);
+            }
             
             console.log(`Unstaking ${amountToUnstake.toString()} tokens from farm ${farmAddress}`);
             
-            // Check if still in lock period
-            if (isStakeLocked) {
-                console.warn("Warning: Attempting to unstake during lock period.");
-                setError("Cannot unstake during lock period. Please wait until lock expires.");
-                setIsUnstaking(false);
-                return;
+            // Verify unstake function exists before calling it
+            if (typeof farmContract.unstake !== 'function') {
+                throw new Error("Unstake function not found on contract. Check the contract ABI.");
             }
             
             const tx = await farmContract.unstake(amountToUnstake);
             setUnstakeTxHash(tx.hash);
-            
             await tx.wait();
-            console.log(`Unstake successful: ${tx.hash}`);
-            setUnstakeAmount(""); // Clear input
-            // Refresh data to show updated stake
+            
+            console.log("Unstake successful:", tx.hash);
+            setUnstakeAmount(""); // Reset input field
+            
+            // Reload data to show updated state
             await loadData();
+            
         } catch (err: any) {
-            console.error("Unstake failed:", err);
-            setError(`Failed to unstake tokens: ${err.message || err}`);
+            console.error("Unstaking failed:", err);
+            setError(`Unstaking failed: ${err.reason || err.message}`);
         } finally {
             setIsUnstaking(false);
         }
@@ -686,34 +806,42 @@ export default function FarmDetailsPage() {
                     {/* Stake Section */}
                     <div style={{ marginTop: '20px', padding:'10px', border: '1px solid #ccc' }}>
                         <h3>Stake {farmData?.stakeTokenSymbol || 'Token'}</h3>
+                        {userData && userData.stakedAmount && !userData.stakedAmount.isZero() ? (
+                            <div style={{margin: '10px 0', padding: '10px', backgroundColor: '#fff8e1', border: '1px solid #ffd54f', borderRadius: '4px'}}>
+                                <p style={{margin: '0', color: '#f57c00'}}>
+                                    <strong>Note:</strong> This farm only allows staking once. 
+                                    If you want to stake more tokens, you must first unstake your current amount, 
+                                    then stake the total desired amount in a single transaction.
+                                </p>
+                            </div>
+                        ) : (
                         <div>
                             <input
                                 type="number"
                                 value={stakeAmount}
                                 min="0"
                                 step="any"
-                                onChange={(e) => {
-                                    const amount = e.target.value;
-                                    if (amount === '' || (/^\d*\.?\d*$/.test(amount) && parseFloat(amount) >= 0)) {
-                                        setStakeAmount(amount);
-                                        // Check allowance dynamically as amount changes
-                                        if (userData && farmData?.stakeTokenDecimals && amount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0) {
-                                            try {
-                                                const requiredBn = ethers.utils.parseUnits(amount, farmData.stakeTokenDecimals);
-                                                setNeedsStakeApproval(userData.stakeTokenAllowance.lt(requiredBn));
-                                            } catch {
-                                                setNeedsStakeApproval(true);
+                                    onChange={(e) => {
+                                        const amount = e.target.value;
+                                        if (amount === '' || (/^\d*\.?\d*$/.test(amount) && parseFloat(amount) >= 0)) {
+                                            setStakeAmount(amount);
+                                            // Check allowance dynamically as amount changes
+                                            if (userData && farmData?.stakeTokenDecimals && amount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0) {
+                                                try {
+                                                    const requiredBn = ethers.utils.parseUnits(amount, farmData.stakeTokenDecimals);
+                                                    setNeedsStakeApproval(userData.stakeTokenAllowance.lt(requiredBn));
+                                                } catch {
+                                                    setNeedsStakeApproval(true);
+                                                }
+                                            } else {
+                                                setNeedsStakeApproval(false);
                                             }
-                                        } else {
-                                            setNeedsStakeApproval(false);
                                         }
-                                    }
-                                }}
+                                    }}
                                 placeholder={`Amount of ${farmData?.stakeTokenSymbol || 'tokens'}`}
                                 disabled={isStaking || isApprovingStake || !farmData?.isFunded}
                                 style={{ padding: '8px', marginRight: '10px' }}
                             />
-                        </div>
                          {hasInsufficientBalance && <p style={{color: 'red', fontSize: '0.9em'}}>Insufficient balance</p>}
                         <div style={{ marginTop: '10px'}}>
                             {needsStakeApproval ? (
@@ -728,6 +856,8 @@ export default function FarmDetailsPage() {
                         </div>
                          {approveTxHash && <p style={{fontSize:'0.8em'}}>Approve Tx: {approveTxHash}</p>}
                          {stakeTxHash && <p style={{fontSize:'0.8em'}}>Stake Tx: {stakeTxHash}</p>}
+                            </div>
+                        )}
                          {!farmData?.isFunded && <p style={{fontSize:'0.8em', color:'orange'}}>Farm not funded yet.</p>}
                     </div>
 

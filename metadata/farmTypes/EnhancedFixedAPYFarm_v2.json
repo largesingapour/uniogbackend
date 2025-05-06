@@ -1,6 +1,6 @@
 {
-  "type": "EnhancedFixedAPYFarm_v1",
-  "implementationAddress": "0x29043BfAc9d647F82f231D48A8888aE0C573F154",
+  "type": "FixedAPYFarm",
+  "implementationAddress": "0x3320Ebf0F55dCE87Fc046e78BEdFd6D0A3906F56",
   "initFields": [
     { 
       "name": "stakeToken", 
@@ -18,16 +18,19 @@
       "name": "lockDurationDays",
       "type": "uint256", 
       "label": "Lock Duration (Days)",
-      "placeholder": "0 for no lock, 30, 90, etc."
+      "placeholder": "Number of days tokens will be locked (e.g., 30, 90)"
     },
     {
-      "name": "boostMultiplierPercent",
+      "name": "fixedAPYPercent",
       "type": "uint256", 
-      "label": "Lock Reward Boost (%)",
-      "placeholder": "0 for no boost, 5, 10, etc."
+      "label": "Fixed APY Percentage",
+      "placeholder": "100 = 100% APY"
     }
   ],
   "metadataFields": [
+    { "name": "farmName", "type": "string" },
+    { "name": "description", "type": "string" },
+    { "name": "farmType", "type": "string" },
     { "name": "stakeToken", "type": "address" },
     { "name": "rewardToken", "type": "address" },
     { "name": "totalStaked", "type": "uint256" },
@@ -36,15 +39,15 @@
     { "name": "funded", "type": "bool" },
     { "name": "totalRewardAmount", "type": "uint256" },
     { "name": "endTimestamp", "type": "uint256" },
-    { "name": "lockDurationSeconds", "type": "uint256" }, 
-    { "name": "boostMultiplier", "type": "uint256" }
+    { "name": "lockDurationSeconds", "type": "uint256" },
+    { "name": "fixedAPYPercent", "type": "uint256" }
   ],
   "actions": {
     "stake": {
       "inputs": [{ "name": "amount", "type": "uint256" }],
       "method": "stake(uint256)"
     },
-     "unstake": {
+    "unstake": {
       "inputs": [{ "name": "amount", "type": "uint256" }],
       "method": "unstake(uint256)"
     },
@@ -52,5 +55,5 @@
       "method": "claim()"
     }
   },
-  "tags": ["fixed", "apy", "lock", "boost"]
+  "tags": ["fixed", "apy", "lock"]
 } 

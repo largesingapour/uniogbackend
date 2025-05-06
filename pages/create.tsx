@@ -3,16 +3,17 @@ import { ethers } from 'ethers';
 import { 
     FARM_FACTORY_ADDRESS, 
     FARM_FACTORY_ABI, 
-    CURRENT_FARM_IMPLEMENTATION_ABI, // Use the new name
+    CURRENT_FARM_IMPLEMENTATION_ABI, // Now imports the full FixedAPYFarm ABI from utils/web3
     ERC20_ABI, 
     getSigner, 
     getAccount, 
     checkNetwork, 
-    getProvider 
+    getProvider,
+    checkFarmTypeRegistered
 } from '../utils/web3';
 
-// --- Statically import only the relevant schema --- 
-import schema_v2 from '../metadata/farmTypes/EnhancedFixedAPYFarm_v1.json';
+// --- Statically import the fixed APY farm schema --- 
+import schema_v2 from '../metadata/farmTypes/FixedAPYFarm_v2.json';
 
 // Interface for the loaded schema structure
 interface FarmSchema {
@@ -103,18 +104,28 @@ export default function CreateFarm() {
 
     // Effect to set schema when selection changes (simplified)
     useEffect(() => {
-        // Directly load the enhanced schema
-        console.log("Loading EnhancedFixedAPYFarm_v1 schema...");
+        // Directly load the schema
+        console.log("Loading FixedAPYFarm_v2 schema...");
         try {
             // Cast the imported JSON directly
             const schemaData = schema_v2 as FarmSchema;
              if (!schemaData || !schemaData.type || !Array.isArray(schemaData.initFields)) {
-                 throw new Error(`Invalid schema structure in EnhancedFixedAPYFarm_v1.json`);
+                 throw new Error(`Invalid schema structure in FixedAPYFarm_v2.json`);
             }
+            // Check if the farm type is registered
+            checkFarmTypeRegistered(schemaData.type).then(isRegistered => {
+                if (!isRegistered) {
+                    console.warn(`Farm type ${schemaData.type} is not registered in the factory. Deployment might fail.`);
+                    setError(`Warning: Farm type ${schemaData.type} is not registered in the factory. Please contact the admin to register it.`);
+                } else {
+                    console.log(`Farm type ${schemaData.type} is registered in the factory.`);
+                    setError("");
+                }
+            });
+            
             // TODO: Check implementationAddress exists in schema?
             setLoadedSchema(schemaData);
             console.log(`Loaded schema with type: ${schemaData.type}`);
-            setError("");
         } catch (err: any) {
             console.error(`Failed to load schema:`, err);
             setError(`Failed to load schema. Error: ${err.message}`);
@@ -356,101 +367,89 @@ export default function CreateFarm() {
     };
 
     // --- VALIDATION (Updated for new fields and schema types) ---
-    const validateInitialInputs = (fields: SchemaField[], data: Record<string, any>, endDateValue: string, currentSigner: string): { valid: boolean; errors: string[]; args: any[]; rewardAmountHuman: string | null } => {
-        let valid = true;
+    const validateInitialInputs = (fields: SchemaField[], data: Record<string, any>, endDateValue: string, currentSigner: string, schemaType: string): { valid: boolean; errors: string[]; args: any[]; rewardAmountHuman: string | null } => {
         const errors: string[] = [];
-        const validatedArgs: Record<string, any> = {}; // Store validated args by name
+        const args: any[] = [];
         let rewardAmountHuman: string | null = null;
-
-        // --- Calculate Duration --- 
-        if (!endDateValue) {
-            valid = false; errors.push("End date is required.");
-        } else {
-            try {
-                const endTime = new Date(endDateValue).getTime();
-                const now = Date.now();
-                const durationSeconds = Math.floor((endTime - now) / 1000);
-                if (durationSeconds <= 0) throw new Error("End date must be in the future.");
-                validatedArgs['duration'] = ethers.BigNumber.from(durationSeconds); // Store duration
-                console.log(`Calculated duration: ${durationSeconds} seconds`);
-            } catch (e: any) {
-                valid = false; errors.push(`Invalid end date/time: ${e.message}`);
+      
+        // Check all fields exist
+        for (const field of fields) {
+            if (!data[field.name] && field.name !== 'endDate') {
+                errors.push(`Missing required field: ${field.label || field.name}`);
             }
         }
-        
-        // --- Store Owner --- 
-        if (!currentSigner || !ethers.utils.isAddress(currentSigner)) {
-             valid = false; errors.push("Connected wallet address is invalid.");
-        } else {
-             validatedArgs['owner'] = currentSigner;
+
+        // Add additional metadata fields to the form data
+        if (!data['farmName']) {
+            errors.push('Farm Name is required');
         }
 
-        // --- Validate fields defined in schema (excluding owner/duration) --- 
-        const schemaFieldsToValidate = fields.filter(f => f.name !== 'owner' && f.name !== 'duration'); 
-        for (const f of schemaFieldsToValidate) {
-            const value = data[f.name];
-            // Use label or name for error messages
-            const fieldDisplayName = f.label || f.name;
-
-            if (value === undefined || value === null || value === '') {
-                valid = false; errors.push(`Field '${fieldDisplayName}' is required.`); continue;
-            }
+        if (!data['description']) {
+            errors.push('Farm Description is required');
+        }
+      
+        // If no errors yet, validate and prepare specific fields
+        if (errors.length === 0) {
+            // Address validations
             try {
-                if (f.type === 'address') {
-                if (!ethers.utils.isAddress(value)) throw new Error(`Invalid address format`);
-                validatedArgs[f.name] = ethers.utils.getAddress(value);
-                } else if (f.type === 'uint256') {
-                    if (f.name === 'lockDurationDays') {
-                        const days = parseInt(value, 10);
-                        if (isNaN(days) || days < 0) throw new Error("Must be a non-negative integer");
-                        validatedArgs['lockDurationSeconds'] = ethers.BigNumber.from(days * 86400); 
-                    } else if (f.name === 'boostMultiplierPercent') {
-                        const percent = parseInt(value, 10);
-                        if (isNaN(percent) || percent < 0) throw new Error("Must be a non-negative integer");
-                        validatedArgs['boostMultiplier'] = ethers.BigNumber.from(100 + percent); 
+                const stakeTokenAddr = ethers.utils.getAddress(data.stakeToken);
+                const rewardTokenAddr = ethers.utils.getAddress(data.rewardToken);
+            
+                // Convert lock duration from days to seconds
+                let lockDurationSeconds = 0;
+                if (data.lockDurationDays) {
+                    const daysValue = parseInt(data.lockDurationDays);
+                    if (isNaN(daysValue) || daysValue < 0) {
+                        errors.push('Lock duration must be a positive number');
                     } else {
-                        // Handle other potential uint256 fields if schema expands
-                        validatedArgs[f.name] = ethers.BigNumber.from(value);
+                        lockDurationSeconds = daysValue * 24 * 60 * 60; // days to seconds
                     }
-                } else {
-                validatedArgs[f.name] = value;
                 }
-            } catch (e: any) {
-                valid = false; errors.push(`Field '${fieldDisplayName}': ${e.message || 'Invalid value'}`);
+            
+                // Parse APY percentage
+                let fixedAPYPercent = 0;
+                if (data.fixedAPYPercent) {
+                    const apyValue = parseInt(data.fixedAPYPercent);
+                    if (isNaN(apyValue) || apyValue < 0) {
+                        errors.push('APY percentage must be a positive number');
+                    } else {
+                        fixedAPYPercent = apyValue;
+                    }
+                }
+            
+                // Calculate reward amount based on APY (example)
+                // NOTE: This calculation is just for display, the actual reward logic happens in the contract
+                if (data.rewardAmount) {
+                    rewardAmountHuman = data.rewardAmount;
+                }
+            
+                // Prepare final arguments array with the encoded parameters format required
+                args.push(
+                    "0x724e6425bb38473e011ea961515c65e81e2769a94ca4c3174aa97e31a057dc20", // Use the exact bytes32 hash directly
+                    ethers.utils.defaultAbiCoder.encode(
+                        ['address', 'address', 'uint256', 'uint256'],
+                        [stakeTokenAddr, rewardTokenAddr, lockDurationSeconds, fixedAPYPercent]
+                    ),
+                    JSON.stringify({
+                        farmName: data.farmName,
+                        description: data.description,
+                        farmType: "FixedAPYFarm"
+                    })
+                );
+            
+            } catch (err: any) {
+                console.error("Validation error:", err);
+                errors.push(`Invalid input data: ${err.message}`);
             }
         }
-
-        // --- Check reward amount separately (for funding step) --- 
-        rewardAmountHuman = data['rewardAmount'];
-        if (!rewardAmountHuman || isNaN(parseFloat(rewardAmountHuman)) || parseFloat(rewardAmountHuman) <= 0) {
-            valid = false; errors.push(`Valid 'Reward Amount' (> 0) is required.`);
-        }
-        
-        // --- Construct final ordered args array based on schema type --- 
-        let finalArgs: any[] = [];
-        if (valid && loadedSchema) { // Ensure schema is loaded before constructing
-            try {
-                 // Always use the Enhanced farm argument order
-                 finalArgs = [
-                    validatedArgs['owner'], 
-                    validatedArgs['stakeToken'], 
-                    validatedArgs['rewardToken'], 
-                    validatedArgs['duration'],
-                    validatedArgs['lockDurationSeconds'], 
-                    validatedArgs['boostMultiplier']
-                 ];
-                 if (finalArgs.some(arg => arg === undefined)) {
-                     throw new Error("Internal validation error: Missing arguments.");
-                 }
-            } catch (e: any) {
-                 valid = false;
-                 errors.push(e.message);
-                 finalArgs = []; // Clear args on error
-            }
-        }
-
-        return { valid, errors, args: finalArgs, rewardAmountHuman };
-    }
+      
+        return {
+            valid: errors.length === 0,
+            errors,
+            args,
+            rewardAmountHuman
+        };
+    };
 
     // --- Action Handlers --- 
 
@@ -468,9 +467,8 @@ export default function CreateFarm() {
         setCurrentFarmAllowance(null);
         setRequiredAmountWei(null);
 
-        // Validate initial inputs (owner, stake, reward token, duration)
-        // Pass endDateString for validation
-        const { valid, errors, args, rewardAmountHuman } = validateInitialInputs(loadedSchema.initFields, formData, endDateString, signerAddress || "");
+        // Validate initial inputs
+        const { valid, errors, args, rewardAmountHuman } = validateInitialInputs(loadedSchema.initFields, formData, endDateString, signerAddress || "", loadedSchema.type);
 
         if (!valid || !rewardAmountHuman) {
             setError(`Input errors: ${errors.join(", ")}`); return;
@@ -498,86 +496,87 @@ export default function CreateFarm() {
             const countBefore = await factoryReader.getFarmCount();
             console.log("Farm count before deployment:", countBefore.toString());
             
-            // Use the type directly from the loaded schema
-            const farmTypeHash = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(loadedSchema.type));
-            const metadataURI = "ipfs://YOUR_METADATA_HASH_HERE";
-
-            // --- Encode initData using the Enhanced ABI --- 
-            const farmInterface = new ethers.utils.Interface(CURRENT_FARM_IMPLEMENTATION_ABI);
-            console.log("Arguments for initialize:", args);
+            // Get validated addresses and other parameters
+            const stakeTokenAddr = ethers.utils.getAddress(formData.stakeToken);
+            const rewardTokenAddr = ethers.utils.getAddress(formData.rewardToken);
             
-            // First encode the args array into a single bytes parameter
-            const encodedArgs = ethers.utils.defaultAbiCoder.encode(
-                [
-                    "address", // owner
-                    "address", // stakeToken
-                    "address", // rewardToken
-                    "uint256", // duration
-                    "uint256", // lockDurationSeconds
-                    "uint256"  // boostMultiplier
-                ],
-                args
+            // Convert lock duration from days to seconds
+            const lockDurationDays = parseInt(formData.lockDurationDays || "0");
+            const lockDurationSeconds = lockDurationDays * 24 * 60 * 60; // days to seconds
+            
+            // Get APY percentage
+            const fixedAPYPercent = parseInt(formData.fixedAPYPercent || "0");
+
+            // Create metadata JSON
+            const metadataURI = JSON.stringify({
+                farmName: formData.farmName,
+                description: formData.description,
+                farmType: "FixedAPYFarm"
+            });
+
+            // --- Encode initData as specified ---
+            const initData = ethers.utils.defaultAbiCoder.encode(
+                ['address', 'address', 'uint256', 'uint256'],
+                [stakeTokenAddr, rewardTokenAddr, lockDurationSeconds, fixedAPYPercent]
             );
             
-            // Then encode the function call with the bytes parameter
-            const initData = farmInterface.encodeFunctionData("initialize", [encodedArgs]);
             console.log("Encoded initData for factory:", initData);
             
-            // --- Pre-flight check ... ---
-             const stakeTokenAddr = args[1]; 
-             const rewardTokenAddr = args[2]; 
-             // ... getCode checks ...
-
-            // --- Call deployFarm with generic initData --- 
-            console.log(`Calling factory.deployFarm with farmTypeHash: ${farmTypeHash}`);
+            // --- Call deployFarm with the farm type and encoded initData --- 
+            // Use the specific bytes32 hash instead of formatting a string
+            const farmType = "0x724e6425bb38473e011ea961515c65e81e2769a94ca4c3174aa97e31a057dc20";
+            console.log(`Calling factory.deployFarm with farm type hash: ${farmType} (FixedAPYFarm)`);
             const txResponse = await factory.deployFarm(
-                farmTypeHash, 
-                initData, // Pass the correctly encoded initData based on schema type
-                metadataURI, 
-                { value: 0 } 
+                farmType, // Use the exact bytes32 hash directly
+                initData, // Properly encoded initialization data
+                metadataURI // Metadata JSON string
             );
             
+            setDeployTxHash(txResponse.hash);
             console.log("Deployment transaction sent:", txResponse.hash);
+            
+            setCurrentStep('waiting_deployment');
             const receipt = await txResponse.wait();
             console.log("Deployment receipt received:", receipt);
 
-            // Wrap post-receipt logic in try/catch
-            try {
-                // --- Get new farm count and fetch the last deployed farm address --- 
-                const countAfter = await factoryReader.getFarmCount();
-                console.log("Farm count after deployment:", countAfter.toString());
-
-                if (!countAfter.gt(countBefore)) {
-                    console.error("Farm count did not increase after deployment transaction.", { countBefore, countAfter });
-                    throw new Error("Deployment transaction confirmed, but farm count did not increase. Cannot find new farm address.");
-                }
+            // Extract the deployed farm address from the event
+            if (receipt.events && receipt.events.length > 0) {
+                // Look for the FarmDeployed event
+                const farmDeployedEvent = receipt.events.find(e => 
+                    e.event === 'FarmDeployed' && e.args && e.args.farm
+                );
                 
-                // Get the last deployed farm from the deployedFarms array by index
-                const newFarmIndex = countAfter.sub(1);
-                const newFarmAddress = await factoryReader.deployedFarms(newFarmIndex);
-                console.log(`Attempting to set deployedFarmAddress state to: ${newFarmAddress}`); 
-                setDeployedFarmAddress(newFarmAddress);
-
-                // Proceed to check allowance for the new farm
-                if (rewardAmountWeiTemp) { 
-                    console.log(`Proceeding to checkFarmAllowance for ${newFarmAddress} with required amount ${rewardAmountWeiTemp.toString()}`); 
-                    await checkFarmAllowance(newFarmAddress, rewardAmountWeiTemp); // Pass the temp variable
+                if (farmDeployedEvent && farmDeployedEvent.args) {
+                    const newFarmAddress = farmDeployedEvent.args.farm;
+                    console.log(`Deployed farm address from event: ${newFarmAddress}`);
+                    setDeployedFarmAddress(newFarmAddress);
+                    
+                    // Proceed to check allowance for the new farm
+                    await checkFarmAllowance(newFarmAddress, rewardAmountWeiTemp);
                 } else {
-                    console.error("Logic error: rewardAmountWeiTemp is null/undefined when trying to check allowance.");
-                    setError("Internal logic error: Reward amount missing.");
-                    setCurrentStep('failed');
-                }
-                // Next step determined by checkFarmAllowance
-            } catch (postDeployError: any) {
-                console.error("Error after deployment confirmation:", postDeployError);
-                setError(`Deployment succeeded, but failed during post-deploy steps: ${postDeployError.message}`);
-                setCurrentStep('failed');
-            }
+                    // Fallback: Try to get the farm address from the factory
+                    const countAfter = await factoryReader.getFarmCount();
+                    console.log("Farm count after deployment:", countAfter.toString());
 
-        } catch (err: any) {
-            console.error("Deployment failed:", err);
-            const revertReason = err.reason || (err.data ? err.data.message : null) || err.message || "Unknown error";
-            setError(`Deployment failed: ${revertReason}`);
+                    if (!countAfter.gt(countBefore)) {
+                        throw new Error("Farm count did not increase after deployment. Cannot find new farm address.");
+                    }
+                    
+                    // Get the last deployed farm from the deployedFarms array by index
+                    const newFarmIndex = countAfter.sub(1);
+                    const newFarmAddress = await factoryReader.deployedFarms(newFarmIndex);
+                    console.log(`Farm address from factory: ${newFarmAddress}`);
+                    setDeployedFarmAddress(newFarmAddress);
+                    
+                    // Check allowance for funding
+                    await checkFarmAllowance(newFarmAddress, rewardAmountWeiTemp);
+                }
+            } else {
+                throw new Error("Deployment receipt has no events. Cannot find farm address.");
+            }
+        } catch(e:any) {
+            console.error("Deployment failed:", e);
+            setError(`Deployment failed: ${e.reason || e.message}`);
             setCurrentStep('failed');
         }
     };
@@ -763,92 +762,153 @@ export default function CreateFarm() {
     }
 
     return (
-        <div>
-            <h1>Create Enhanced Fixed APY Farm</h1>
+        <div style={{ maxWidth: '800px', margin: '0 auto', padding: '20px' }}>
+            <h1>Create Fixed APY Farm</h1>
             
-            <h2>Configure Farm</h2>
-
-            {/* Dynamic Form Fields based on loadedSchema */}
-            {loadedSchema.initFields 
-                // Filter out owner (auto) and duration (handled by date picker)
-                .filter(f => f.name !== 'owner' && f.name !== 'duration') 
-                .map((f: SchemaField) => {
-                    const isStakeTokenField = f.name === 'stakeToken';
-                    const isRewardTokenField = f.name === 'rewardToken';
-                    const tokenInfo = isStakeTokenField ? stakeTokenInfo : (isRewardTokenField ? rewardTokenInfo : null);
-                    const isLoadingInfo = isStakeTokenField ? isFetchingStakeInfo : (isRewardTokenField ? isFetchingRewardInfo : false);
-                    
-                    // Only render fields defined in the current schema's initFields
-                    // And manually add the rewardAmount field which is needed for funding
-                    return (
-                        <div key={f.name} style={{ marginBottom: '10px' }}>
-                            <label style={{ display: 'block', marginBottom: '5px' }}>
-                                {f.label || f.name} {/* Use custom label if available */}
-                                {isStakeTokenField && tokenInfo && ` (${tokenInfo.symbol})`}
-                                {isRewardTokenField && tokenInfo && ` (${tokenInfo.symbol})`}
-                                {(isStakeTokenField || isRewardTokenField) && !tokenInfo && ' (address)'}
-                            </label>
-                            <div style={{ display: 'flex', alignItems: 'center' }}>
-                                <input 
-                                    type={f.name === 'lockDurationDays' || f.name === 'boostMultiplierPercent' ? 'number' : f.type === 'address' ? 'text' : 'text'} // Adjust input type
-                                    min={f.type === 'uint256' ? "0" : undefined}
-                                    step={f.name === 'lockDurationDays' || f.name === 'boostMultiplierPercent' ? '1' : undefined} // Integer steps
-                                    value={formData[f.name] || ''} 
-                                    onChange={(e) => handleChange(f.name, e.target.value)}
-                                    placeholder={f.placeholder || (f.type === 'address' ? '0x...' : '0')}
-                                    disabled={disableInputs}
-                                    style={{ padding: '8px', width: '300px' }}
-                                />
-                                {isLoadingInfo && <span style={{ marginLeft: '10px', fontSize: '0.8em'}}> (Loading...)</span>}
-                                {!isLoadingInfo && tokenInfo && <span style={{ marginLeft: '10px', fontSize: '0.9em', color: 'grey' }}>{tokenInfo.name}</span>}
-                            </div>
-                        </div>
-                    );
-                 })
-            }
-            {/* Always render Reward Amount field separately as it's needed for funding */}
-            <div key="rewardAmount" style={{ marginBottom: '10px' }}>
-                <label style={{ display: 'block', marginBottom: '5px' }}>
-                    Reward Amount {rewardTokenInfo ? `(${rewardTokenInfo.name} - ${rewardTokenDecimals ?? ''} decimals)` : '(Enter reward token first)'}
-                </label>
-                <div style={{ display: 'flex', alignItems: 'center' }}>
+            {error && <div style={{ color: 'red', marginBottom: '20px', padding: '10px', backgroundColor: '#ffeeee', borderRadius: '5px' }}>{error}</div>}
+            
+            <div style={{ marginBottom: '20px', padding: '20px', border: '1px solid #eee', borderRadius: '5px' }}>
+                <h2>Farm Metadata</h2>
+                
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                        Farm Name *
+                    </label>
                     <input 
-                        type="number"
-                        min="0"
-                        step="any" // Allow decimals
-                        value={formData['rewardAmount'] || ''} 
-                        onChange={(e) => handleChange('rewardAmount', e.target.value)}
-                        placeholder={'e.g., 100.5'}
-                        disabled={disableInputs || rewardTokenDecimals === null && !!formData['rewardToken']}
-                        style={{ padding: '8px', width: '300px' }}
+                        type="text"
+                        value={formData['farmName'] || ''}
+                        onChange={(e) => handleChange('farmName', e.target.value)}
+                        placeholder="Enter a name for your farm"
+                        style={{ 
+                            width: '100%', 
+                            padding: '8px', 
+                            border: '1px solid #ccc', 
+                            borderRadius: '4px' 
+                        }}
+                        disabled={currentStep !== 'idle'}
                     />
-                    {isFetchingRewardInfo && <span style={{ marginLeft: '10px', fontSize: '0.8em'}}> (Loading...)</span>}
+                </div>
+                
+                <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                        Description *
+                    </label>
+                    <textarea 
+                        value={formData['description'] || ''}
+                        onChange={(e) => handleChange('description', e.target.value)}
+                        placeholder="Enter a description for your farm"
+                        style={{ 
+                            width: '100%', 
+                            padding: '8px', 
+                            border: '1px solid #ccc', 
+                            borderRadius: '4px',
+                            minHeight: '100px' 
+                        }}
+                        disabled={currentStep !== 'idle'}
+                    />
                 </div>
             </div>
-
-            {/* Always render End Date Picker */}
-            <div key="endDate" style={{ marginBottom: '10px' }}>
-                 <label style={{ display: 'block', marginBottom: '5px' }}>End Date & Time</label>
-                 <input 
-                     type="datetime-local"
-                     value={endDateString}
-                     min={getMinEndDate()} 
-                     onChange={(e) => handleChange('endDate', e.target.value)}
-                     disabled={disableInputs}
-                     style={{ padding: '8px', width: '300px' }}
-                 />
+            
+            {loadedSchema && (
+                <div style={{ marginBottom: '20px', padding: '20px', border: '1px solid #eee', borderRadius: '5px' }}>
+                    <h2>Farm Configuration</h2>
+                    
+                    {loadedSchema.initFields.map((field) => (
+                        <div key={field.name} style={{ marginBottom: '15px' }}>
+                            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                                {field.label || field.name} *
+                            </label>
+                            <input 
+                                type={getInputType(field.type)}
+                                value={formData[field.name] || ''}
+                                onChange={(e) => handleChange(field.name, e.target.value)}
+                                placeholder={field.placeholder || ''}
+                                style={{ 
+                                    width: '100%', 
+                                    padding: '8px', 
+                                    border: '1px solid #ccc', 
+                                    borderRadius: '4px' 
+                                }}
+                                disabled={currentStep !== 'idle'}
+                            />
+                            
+                            {/* Show token info if available */}
+                            {field.name === 'stakeToken' && stakeTokenInfo && (
+                                <div style={{ marginTop: '5px', fontSize: '14px', color: '#666' }}>
+                                    Token: {stakeTokenInfo.name} ({stakeTokenInfo.symbol})
+                                </div>
+                            )}
+                            
+                            {field.name === 'rewardToken' && rewardTokenInfo && (
+                                <div style={{ marginTop: '5px', fontSize: '14px', color: '#666' }}>
+                                    Token: {rewardTokenInfo.name} ({rewardTokenInfo.symbol})
+                                </div>
+                            )}
+                            
+                            {/* Show loading indicators */}
+                            {field.name === 'stakeToken' && isFetchingStakeInfo && (
+                                <div style={{ marginTop: '5px', fontSize: '14px', color: '#666' }}>
+                                    Fetching token info...
+                                </div>
+                            )}
+                            
+                            {field.name === 'rewardToken' && isFetchingRewardInfo && (
+                                <div style={{ marginTop: '5px', fontSize: '14px', color: '#666' }}>
+                                    Fetching token info...
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    
+                    {/* Add reward amount field */}
+                    <div style={{ marginBottom: '15px' }}>
+                        <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                            Reward Amount *
+                        </label>
+                        <input 
+                            type="number"
+                            value={formData['rewardAmount'] || ''}
+                            onChange={(e) => handleChange('rewardAmount', e.target.value)}
+                            placeholder="Amount of reward tokens to fund the farm"
+                            style={{ 
+                                width: '100%', 
+                                padding: '8px', 
+                                border: '1px solid #ccc', 
+                                borderRadius: '4px' 
+                            }}
+                            disabled={currentStep !== 'idle'}
+                        />
+                        {rewardTokenInfo && (
+                            <div style={{ marginTop: '5px', fontSize: '14px', color: '#666' }}>
+                                You will need to approve {formData['rewardAmount'] || '0'} {rewardTokenInfo.symbol} tokens
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+            
+            {/* Action buttons */}
+            <div style={{ marginTop: '20px' }}>
+                {renderCurrentStep()}
             </div>
             
-            {/* Render current step UI / Button */} 
-            <div style={{marginTop: '20px'}}> 
-                {renderCurrentStep()} 
-            </div>
-
-            {/* Global Status Messages */}
-            {!isConnected && <p style={{ color: 'orange', marginTop: '10px' }}>Connect wallet to start</p>}
-            {isWrongNetwork && <p style={{ color: 'orange', marginTop: '10px' }}>Please switch to UNICHAIN network</p>}
-            {error && <p style={{ color: 'red', marginTop: '10px' }}>Error: {error}</p>}
-    </div>
-  );
+            {/* Display deployment information */}
+            {deployedFarmAddress && (
+                <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '5px' }}>
+                    <h3>Deployment Information</h3>
+                    <p><strong>Farm Address:</strong> {deployedFarmAddress}</p>
+                    {deployTxHash && (
+                        <p><strong>Deploy Transaction:</strong> {deployTxHash}</p>
+                    )}
+                    {approveTxHash && (
+                        <p><strong>Approve Transaction:</strong> {approveTxHash}</p>
+                    )}
+                    {fundTxHash && (
+                        <p><strong>Fund Transaction:</strong> {fundTxHash}</p>
+                    )}
+                </div>
+            )}
+        </div>
+    );
 }
 

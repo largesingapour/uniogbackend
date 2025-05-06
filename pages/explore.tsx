@@ -117,6 +117,16 @@ export default function ExploreFarms() {
           const farmDataPromises = allFarmAddresses.map(async (addr) => {
             try {
                const farmContract = new ethers.Contract(addr, CURRENT_FARM_IMPLEMENTATION_ABI, currentProvider);
+               
+               // Check if getMetadata function exists before calling it
+               if (typeof farmContract.getMetadata !== 'function') {
+                 console.error(`Farm at ${addr} doesn't have getMetadata function`);
+                 return { 
+                   address: addr, 
+                   data: [{ name: "Error", value: "Farm contract doesn't support metadata retrieval" }] 
+                 };
+               }
+               
                const metadataBytes = await farmContract.getMetadata();
                console.log(`Metadata bytes for ${addr}:`, metadataBytes);
                

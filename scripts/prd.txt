@@ -1,0 +1,93 @@
+# UNICHAIN DeFi Farming Platform Refactoring PRD
+
+## Project Overview
+The UNICHAIN DeFi Farming Platform is an existing application that allows users to create and interact with yield farming contracts on the UNICHAIN blockchain. The application needs to be refactored to improve modularity, scalability, and user experience.
+
+## Current State
+- The platform currently supports basic farm creation and staking
+- Uses ethers.js for blockchain interactions
+- Has implemented RainbowKit for wallet connections
+- Supports multiple networks including UNICHAIN, Base, and Ethereum Mainnet
+- Basic UI for farm exploration and creation
+- Limited farm type customization
+
+## Goals
+Refactor the existing codebase to achieve:
+1. Dynamic farm type configuration without code changes
+2. Enhanced metadata-driven UI generation
+3. Improved data storage and retrieval
+4. Better farm analytics and TVL tracking
+5. Enhanced user experience with responsive design
+6. Embeddable components
+
+## Detailed Requirements
+
+### Dynamic Farm Type Registry
+- Create a registry system that defines farm types through metadata
+- Support JSON or MongoDB storage of farm type definitions
+- Include parameters, validation rules, and UI specifications
+- Allow admin interface for adding new farm types without code changes
+- Farm types should include parameters like reward mechanisms, lock periods, and bonus structures
+
+### Dynamic UI Generation
+- Refactor frontend to generate forms based on farm type metadata
+- Create reusable form components that adapt to different parameter types
+- Update farm cards to display data based on farm type specifications
+- Support custom validation rules defined in metadata
+- Include preview functionality for farm creation
+
+### Enhanced Data Storage
+- Upgrade MongoDB schema to store dynamic farm metadata
+- Optimize query patterns for farm listing and filtering
+- Add proper indexing for performance
+- Support versioning of farm metadata
+- Implement caching for frequently accessed data
+
+### Backend API Enhancements
+- Update APIs to support dynamic farm type querying
+- Add filtering capabilities based on farm parameters
+- Create aggregation endpoints for analytics
+- Implement pagination and sorting
+- Add search functionality across farm metadata
+
+### TVL Dashboard
+- Implement a dynamic TVL aggregation system
+- Create charts and visualizations for TVL metrics
+- Support filtering by farm type, token, or custom parameters
+- Include historical data tracking
+- Add export functionality for analytics
+
+### Contract Enhancements
+- Update and deploy enhanced FixedAPYFarm contracts
+- Add emergency withdrawal mechanisms
+- Implement reward distribution safeguards
+- Support dynamic fee structures
+- Improve gas efficiency
+
+### UI/UX Improvements
+- Implement responsive dark/light themes with Tailwind CSS
+- Create consistent design language across components
+- Optimize mobile experience
+- Add loading states and error handling
+- Improve navigation and farm discovery
+
+### Embeddable Components
+- Create standalone, embeddable iframe pages for forms
+- Develop shareable dashboards with configurable views
+- Support URL parameter customization for embeds
+- Include theming options for embedded components
+- Implement postMessage API for cross-frame communication
+
+## Technical Constraints
+- Must maintain compatibility with UNICHAIN blockchain
+- Should support multiple wallet providers via RainbowKit
+- Must be backward compatible with existing deployed farms
+- Should follow best practices for React and Next.js development
+- Must be secure and auditable
+
+## Success Metrics
+- Reduced time to add new farm types
+- Increased user engagement with farming platform
+- Improved loading and transaction times
+- Higher TVL across all farms
+- Successful integration of embeddable components on partner sites 
