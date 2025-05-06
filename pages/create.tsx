@@ -286,8 +286,19 @@ export default function CreateFarm() {
         // Handle date input separately
         if (field === 'endDate') {
             setEndDateString(value);
+        } else if (field === 'lockDurationDays') {
+            // Validate lockDurationDays to prevent zero values
+            const parsedValue = parseInt(value);
+            if (parsedValue <= 0) {
+                setError("Lock duration must be greater than zero days");
+                // Still update the form data so the user sees what they typed
+                setFormData((prev) => ({ ...prev, [field]: value }));
+            } else {
+                setError(""); // Clear error if value is valid
+                setFormData((prev) => ({ ...prev, [field]: value }));
+            }
         } else {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+            setFormData((prev) => ({ ...prev, [field]: value }));
         }
         // Reset later steps if inputs change
         if (currentStep !== 'idle' && currentStep !== 'deploying' && currentStep !== 'waiting_deployment') {
@@ -387,6 +398,14 @@ export default function CreateFarm() {
         if (!data['description']) {
             errors.push('Farm Description is required');
         }
+
+        // Explicitly validate lockDurationDays to prevent zero values
+        if (data.lockDurationDays) {
+            const daysValue = parseInt(data.lockDurationDays);
+            if (isNaN(daysValue) || daysValue <= 0) {
+                errors.push('Lock duration must be greater than zero days');
+            }
+        }
       
         // If no errors yet, validate and prepare specific fields
         if (errors.length === 0) {
@@ -399,8 +418,8 @@ export default function CreateFarm() {
                 let lockDurationSeconds = 0;
                 if (data.lockDurationDays) {
                     const daysValue = parseInt(data.lockDurationDays);
-                    if (isNaN(daysValue) || daysValue < 0) {
-                        errors.push('Lock duration must be a positive number');
+                    if (isNaN(daysValue) || daysValue <= 0) {
+                        errors.push('Lock duration must be greater than zero days');
                     } else {
                         lockDurationSeconds = daysValue * 24 * 60 * 60; // days to seconds
                     }

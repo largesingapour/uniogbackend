@@ -1,147 +1,80 @@
-import React, { useState, useEffect } from 'react';
-import { ethers } from 'ethers';
-import { getAccount, checkNetwork, getSigner } from './web3';
+import React from 'react';
+import '@rainbow-me/rainbowkit/styles.css';
+import {
+  RainbowKitProvider,
+  ConnectButton,
+  getDefaultConfig,
+  lightTheme,
+  darkTheme
+} from '@rainbow-me/rainbowkit';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { WagmiProvider } from 'wagmi';
+import { mainnet, base } from 'wagmi/chains';
+import { http } from 'wagmi';
 
-// A simple wallet connect component that supports MetaMask and can switch to UNICHAIN
-const WalletConnect: React.FC = () => {
-  const [address, setAddress] = useState<string | null>(null);
-  const [chainIsValid, setChainIsValid] = useState<boolean>(false);
-  const [isConnecting, setIsConnecting] = useState<boolean>(false);
+// Define UNICHAIN as a custom chain
+const unichain = {
+  id: 130,
+  name: 'UNICHAIN',
+  nativeCurrency: {
+    decimals: 18,
+    name: 'UNICHAIN',
+    symbol: 'UNI',
+  },
+  rpcUrls: {
+    public: { http: ['https://rpc.unichain.network'] },
+    default: { http: ['https://rpc.unichain.network'] },
+  },
+  blockExplorers: {
+    default: { name: 'UniScan', url: 'https://scan.unichain.network' },
+  },
+} as const;
 
-  const updateConnectionStatus = async () => {
-    try {
-      const currentAccount = await getAccount();
-      setAddress(currentAccount);
-      
-      if (currentAccount) {
-        const isCorrectChain = await checkNetwork();
-        setChainIsValid(isCorrectChain);
-      }
-    } catch (error) {
-      console.error("Error updating connection status:", error);
-    }
-  };
+// Create a config with the getDefaultConfig helper
+const config = getDefaultConfig({
+  appName: 'UNICHAIN Farm',
+  projectId: '24d363deb599a3c2c46b3e09e7bad231',
+  chains: [unichain, base, mainnet],
+  transports: {
+    [unichain.id]: http('https://rpc.unichain.network'),
+    [base.id]: http(),
+    [mainnet.id]: http(),
+  },
+  ssr: true
+});
 
-  // Check connection on component mount
-  useEffect(() => {
-    updateConnectionStatus();
-    
-    // Set up event listeners for account and chain changes
-    if (typeof window !== 'undefined' && window.ethereum) {
-      // Use any type to avoid TypeScript errors with ethereum object
-      const ethereum = window.ethereum as any;
-      
-      ethereum.on('accountsChanged', updateConnectionStatus);
-      ethereum.on('chainChanged', updateConnectionStatus);
-      
-      // Cleanup on component unmount
-      return () => {
-        ethereum.removeListener('accountsChanged', updateConnectionStatus);
-        ethereum.removeListener('chainChanged', updateConnectionStatus);
-      };
-    }
-  }, []);
+// Create a query client for data fetching
+const queryClient = new QueryClient();
 
-  const connectWallet = async () => {
-    try {
-      setIsConnecting(true);
-      // This will trigger wallet connection
-      await getSigner();
-      await updateConnectionStatus();
-    } catch (error) {
-      console.error("Failed to connect wallet:", error);
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const switchToUnichain = async () => {
-    try {
-      if (typeof window !== 'undefined' && window.ethereum) {
-        // Use any type to avoid TypeScript errors with ethereum object
-        const ethereum = window.ethereum as any;
-        
-        await ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0x82' }], // 130 in hex
-        });
-      }
-    } catch (error: any) {
-      // If chain doesn't exist, try to add it
-      if (error.code === 4902) {
-        try {
-          const ethereum = window.ethereum as any;
-          
-          await ethereum.request({
-            method: 'wallet_addEthereumChain',
-            params: [
-              {
-                chainId: '0x82', // 130 in hex
-                chainName: 'UNICHAIN',
-                nativeCurrency: {
-                  name: 'UNICHAIN',
-                  symbol: 'UNI',
-                  decimals: 18,
-                },
-                rpcUrls: ['https://rpc.unichain.network'],
-                blockExplorerUrls: ['https://scan.unichain.network'],
-              },
-            ],
-          });
-        } catch (addError) {
-          console.error("Failed to add UNICHAIN network:", addError);
-        }
-      } else {
-        console.error("Failed to switch network:", error);
-      }
-    }
-  };
-
-  // Render a connect button, switch network button, or connected address
-  if (!address) {
-    return (
-      <button 
-        onClick={connectWallet} 
-        disabled={isConnecting}
-        style={{
-          backgroundColor: '#3f51b5',
-          color: 'white',
-          padding: '8px 16px',
-          borderRadius: '4px',
-          border: 'none',
-          cursor: isConnecting ? 'default' : 'pointer',
-          fontWeight: 'bold'
-        }}
-      >
-        {isConnecting ? 'Connecting...' : 'Connect Wallet'}
-      </button>
-    );
-  }
-
-  if (!chainIsValid) {
-    return (
-      <button 
-        onClick={switchToUnichain}
-        style={{
-          backgroundColor: 'orange',
-          color: 'white',
-          padding: '8px 16px',
-          borderRadius: '4px',
-          border: 'none',
-          cursor: 'pointer',
-          fontWeight: 'bold'
-        }}
-      >
-        Switch to UNICHAIN
-      </button>
-    );
-  }
-
+// Web3Provider component wraps the application to provide wallet connection functionality
+export const Web3Provider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
-    <div style={{ fontWeight: 'bold', color: '#4caf50' }}>
-      Connected: {address.substring(0, 6)}...{address.substring(address.length - 4)}
-    </div>
+    <WagmiProvider config={config}>
+      <QueryClientProvider client={queryClient}>
+        <RainbowKitProvider
+          theme={lightTheme({
+            accentColor: '#3f51b5',
+            accentColorForeground: 'white',
+            borderRadius: 'medium'
+          })}
+        >
+          {children}
+        </RainbowKitProvider>
+      </QueryClientProvider>
+    </WagmiProvider>
   );
 };
 
-export default WalletConnect; 
+// Enhanced connect button with additional options
+export const EnhancedWalletButton: React.FC = () => {
+  return (
+    <ConnectButton 
+      showBalance={true}
+      chainStatus="icon"
+      accountStatus="address"
+    />
+  );
+};
+
+// Export default for easy importing
+export default EnhancedWalletButton; 
