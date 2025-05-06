@@ -1,0 +1,56 @@
+{
+  "type": "EnhancedFixedAPYFarm_v1",
+  "implementationAddress": "0x29043BfAc9d647F82f231D48A8888aE0C573F154",
+  "initFields": [
+    { 
+      "name": "stakeToken", 
+      "type": "address",
+      "label": "Stake Token Address",
+      "placeholder": "0x... address of token users will stake"
+    },
+    { 
+      "name": "rewardToken", 
+      "type": "address",
+      "label": "Reward Token Address",
+      "placeholder": "0x... address of token users will receive"
+    },
+    { 
+      "name": "lockDurationDays",
+      "type": "uint256", 
+      "label": "Lock Duration (Days)",
+      "placeholder": "0 for no lock, 30, 90, etc."
+    },
+    {
+      "name": "boostMultiplierPercent",
+      "type": "uint256", 
+      "label": "Lock Reward Boost (%)",
+      "placeholder": "0 for no boost, 5, 10, etc."
+    }
+  ],
+  "metadataFields": [
+    { "name": "stakeToken", "type": "address" },
+    { "name": "rewardToken", "type": "address" },
+    { "name": "totalStaked", "type": "uint256" },
+    { "name": "rewardRatePerSecond", "type": "uint256" },
+    { "name": "lastUpdate", "type": "uint256" },
+    { "name": "funded", "type": "bool" },
+    { "name": "totalRewardAmount", "type": "uint256" },
+    { "name": "endTimestamp", "type": "uint256" },
+    { "name": "lockDurationSeconds", "type": "uint256" }, 
+    { "name": "boostMultiplier", "type": "uint256" }
+  ],
+  "actions": {
+    "stake": {
+      "inputs": [{ "name": "amount", "type": "uint256" }],
+      "method": "stake(uint256)"
+    },
+     "unstake": {
+      "inputs": [{ "name": "amount", "type": "uint256" }],
+      "method": "unstake(uint256)"
+    },
+    "claim": {
+      "method": "claim()"
+    }
+  },
+  "tags": ["fixed", "apy", "lock", "boost"]
+} 

@@ -1,0 +1,26 @@
+{
+  "name": "unichain-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@rainbow-me/rainbowkit": "^2.2.4",
+    "@tanstack/react-query": "^5.75.4",
+    "@thirdweb-dev/chains": "^0.1.120",
+    "@thirdweb-dev/react": "^4.9.4",
+    "@thirdweb-dev/sdk": "^4.0.99",
+    "ethers": "^5.7.2",
+    "next": "13.4.12",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "viem": "^2.29.0",
+    "wagmi": "^2.15.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.1.6"
+  }
+}
