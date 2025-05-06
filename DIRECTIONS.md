@@ -5,12 +5,12 @@ This tutorial explains the architecture and process for creating, managing, and 
 **Core Concepts:**
 
 1.  **`FarmFactory.sol`:** A central contract responsible for deploying new farm contracts. It does *not* contain the specific logic for any particular farm type. Its key job is to clone existing implementation contracts using a generic `deployFarm(bytes32 farmType, bytes calldata initData, ...)` function.
-2.  **Farm Implementations (e.g., `EnhancedFixedAPYFarm.sol`):** These are separate contracts containing the actual logic for a specific type of farm (staking rules, reward calculations, locking mechanisms, etc.). They are designed to be "cloned" by the factory. Crucially, they have an `initialize(bytes memory data)` function to set up their specific parameters *after* being cloned, decoding the `initData` provided by the factory.
+2.  **Farm Implementations (e.g., `FixedAPYFarm.sol`):** These are separate contracts containing the actual logic for a specific type of farm (staking rules, reward calculations, locking mechanisms, etc.). They are designed to be "cloned" by the factory. Crucially, they have an `initialize(bytes memory data)` function to set up their specific parameters *after* being cloned, decoding the `initData` provided by the factory.
 3.  **`IFarm.sol`:** An interface standardizing common functions expected across all farm types (like `initialize(bytes)`, `getMetadata`, `stake`, `claim`, `unstake`, etc.). This helps ensure compatibility.
-4.  **`farmType` (bytes32):** A unique identifier (a hash) representing a specific farm type (e.g., "EnhancedFixedAPYFarm_v1"). This is calculated in the frontend from a descriptive string.
+4.  **`farmType` (bytes32):** A unique identifier (a hash) representing a specific farm type (e.g., "FixedAPYFarm_v1"). This is calculated in the frontend from a descriptive string.
 5.  **Registration:** The *owner* of the `FarmFactory` must register each new farm *implementation contract* address, associating it with a specific `farmType` hash using the factory's `registerFarmType` function. This tells the factory which code to clone when a user requests that type.
-6.  **Metadata Schemas (`.json`):** For each farm type, a corresponding JSON file (e.g., `EnhancedFixedAPYFarm_v1.json`) is stored in the frontend (`metadata/farmTypes/`). These schemas describe the farm for the UI:
-    *   `type`: The unique string identifier used to calculate the `farmType` hash (e.g., "EnhancedFixedAPYFarm_v1").
+6.  **Metadata Schemas (`.json`):** For each farm type, a corresponding JSON file (e.g., `FixedAPYFarm_v1.json`) is stored in the frontend (`metadata/farmTypes/`). These schemas describe the farm for the UI:
+    *   `type`: The unique string identifier used to calculate the `farmType` hash (e.g., "FixedAPYFarm_v1").
     *   `implementationAddress`: The on-chain address of the deployed implementation contract for this type. (Used by frontend for reference/verification, not directly by factory).
     *   `initFields`: An array describing the inputs needed from the user on the `/create` page to construct the `initialize` call data (excluding owner/duration which are handled differently). Can include `label` and `placeholder` for the UI.
     *   `metadataFields`: An array describing the structure and types of data returned by the farm's `getMetadata()` view function. Used by `/explore` and `/farm/[address]` to decode and display farm info.
@@ -66,7 +66,7 @@ This tutorial explains the architecture and process for creating, managing, and 
 **Fee Implementation Notes:**
 
 *   **Creator Fee:** Can be implemented via the factory's `setDeploymentFee` function (owner sets fee, users pay via `msg.value` on `deployFarm`).
-*   **Staker Fee:** Requires modifying the specific farm implementation contract (`EnhancedFixedAPYFarm.sol`, `LotteryFarm.sol`, etc.) within the relevant functions (`stake`, `claim`, `unstake`) to transfer a percentage/fixed amount to a platform wallet. Frontend fees are insecure.
+*   **Staker Fee:** Requires modifying the specific farm implementation contract (`FixedAPYFarm.sol`, `LotteryFarm.sol`, etc.) within the relevant functions (`stake`, `claim`, `unstake`) to transfer a percentage/fixed amount to a platform wallet. Frontend fees are insecure.
 
 **Current Setup (as of last successful edit):**
 

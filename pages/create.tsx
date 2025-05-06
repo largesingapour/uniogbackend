@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import { 
     FARM_FACTORY_ADDRESS, 
     FARM_FACTORY_ABI, 
-    CURRENT_FARM_IMPLEMENTATION_ABI, // Now imports the full FixedAPYFarm ABI from utils/web3
+    CURRENT_FARM_IMPLEMENTATION_ABI, 
     ERC20_ABI, 
     getSigner, 
     getAccount, 
@@ -728,14 +728,14 @@ export default function CreateFarm() {
             case 'waiting_approval':
                 return <p>Waiting for approval confirmation... Tx: {approveTxHash}</p>; 
             case 'needs_funding':
-  return (
+                return (
                     <div style={{ marginTop: '15px', padding: '10px', border: '1px solid green' }}>
                         <p><b>Final Step:</b> Fund the new Farm contract ({deployedFarmAddress?.substring(0,6)}...) with the rewards.</p>
                         {requiredAmountWei !== null && (
                             <p style={{fontSize: '0.9em'}}>Amount: {ethers.utils.formatUnits(requiredAmountWei, rewardTokenDecimals || 18)} tokens</p>
                         )}
                         <button onClick={handleFundFarm} disabled={!isConnected || isWrongNetwork}>Fund Farm</button>
-        </div>
+                    </div>
                 );
             case 'funding':
                 return <p>Funding farm... Tx: {fundTxHash || 'Waiting...'}</p>;       
@@ -842,6 +842,7 @@ export default function CreateFarm() {
                                 value={formData[field.name] || ''}
                                 onChange={(e) => handleChange(field.name, e.target.value)}
                                 placeholder={field.placeholder || ''}
+                                min={field.name === 'lockDurationDays' ? '1' : undefined}
                                 style={{ 
                                     width: '100%', 
                                     padding: '8px', 
