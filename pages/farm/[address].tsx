@@ -4,7 +4,7 @@ import { useRouter } from 'next/router';
 import React, { useEffect, useState, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { useAccount, useWalletClient, usePublicClient, useChainId } from 'wagmi';
-import { CURRENT_FARM_IMPLEMENTATION_ABI, ERC20_ABI } from '../../utils/web3';
+import { CURRENT_FARM_IMPLEMENTATION_ABI, ERC20_ABI, getProvider } from '../../utils/web3';
 
 // Interface for decoded farm data
 interface DecodedFarmData {
@@ -104,28 +104,6 @@ export default function FarmDetailsPage() {
     const [unstakeTxHash, setUnstakeTxHash] = useState("");
     const [currentLockEndTime, setCurrentLockEndTime] = useState<ethers.BigNumber | null>(null);
     const [isStakeLocked, setIsStakeLocked] = useState<boolean>(false);
-
-    // Get ethers provider from window.ethereum
-    const getProvider = useCallback(() => {
-        if (typeof window !== 'undefined' && window.ethereum) {
-            return new ethers.providers.Web3Provider(window.ethereum);
-        }
-        
-        // Return the primary UNICHAIN RPC endpoint
-        try {
-            return new ethers.providers.JsonRpcProvider('https://mainnet.unichain.org');
-        } catch (e) {
-            console.error("Error connecting to primary RPC:", e);
-            // Try fallback providers
-            try {
-                return new ethers.providers.JsonRpcProvider('https://unichain-rpc.publicnode.com');
-            } catch (e2) {
-                console.error("Error connecting to first fallback RPC:", e2);
-                // Try another fallback
-                return new ethers.providers.JsonRpcProvider('https://unichain-mainnet.g.alchemy.com/v2/demo');
-            }
-        }
-    }, []);
 
     // Function to safely call contract methods with retries
     const safeContractCall = async <T,>(

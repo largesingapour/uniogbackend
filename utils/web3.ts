@@ -39,20 +39,20 @@ const hasEthereumProvider = (): boolean => {
   return typeof window !== 'undefined' && typeof window.ethereum !== 'undefined';
 };
 
-// Function to get the Ethers provider
+// Function to get the Ethers provider - use read-only RPC when not connected
 export const getProvider = () => {
-  // With the Wagmi hooks setup, we need to fallback to window.ethereum
-  // Since hooks can only be used in components and not in utility functions
-  if (!hasEthereumProvider()) {
-    throw new Error("No Ethereum provider found. Install MetaMask or a similar wallet.");
+  // Try first to use window.ethereum if available (for direct signing operations)
+  if (hasEthereumProvider()) {
+    return new ethers.providers.Web3Provider(window.ethereum);
   }
-  return new ethers.providers.Web3Provider(window.ethereum);
+  
+  // Fall back to a read-only provider if no wallet is connected
+  console.log("No wallet connected, using read-only provider");
+  return new ethers.providers.JsonRpcProvider('https://mainnet.unichain.org');
 };
 
 // Function to get the Ethers signer
 export const getSigner = async () => {
-  // With the Wagmi hooks setup, we need to fallback to window.ethereum
-  // Since hooks can only be used in components and not in utility functions
   if (!hasEthereumProvider()) {
     throw new Error("No Ethereum provider found. Install MetaMask or a similar wallet.");
   }
@@ -65,8 +65,6 @@ export const getSigner = async () => {
 
 // Function to get the connected account address
 export const getAccount = async (): Promise<string | null> => {
-  // With the Wagmi hooks setup, we need to fallback to window.ethereum
-  // Since hooks can only be used in components and not in utility functions
   if (!hasEthereumProvider()) {
     return null;
   }
@@ -82,8 +80,6 @@ export const getAccount = async (): Promise<string | null> => {
 
 // Function to check if connected to the correct network (UNICHAIN)
 export const checkNetwork = async (): Promise<boolean> => {
-  // With the Wagmi hooks setup, we need to fallback to window.ethereum
-  // Since hooks can only be used in components and not in utility functions
   if (!hasEthereumProvider()) {
     return false;
   }
