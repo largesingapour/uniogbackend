@@ -30,6 +30,9 @@ const unichain = {
   },
 } as const;
 
+// Get the base URL for metadata
+const appUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+
 // Create a config with the getDefaultConfig helper
 const config = getDefaultConfig({
   appName: 'UNICHAIN Farm',
@@ -57,6 +60,11 @@ export const Web3Provider: React.FC<{ children: React.ReactNode }> = ({ children
             accentColorForeground: 'white',
             borderRadius: 'medium'
           })}
+          appInfo={{
+            appName: 'UNICHAIN Farm',
+            disclaimer: null,
+            learnMoreUrl: 'https://uniscan.xyz',
+          }}
         >
           {children}
         </RainbowKitProvider>
