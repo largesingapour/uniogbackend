@@ -113,7 +113,7 @@ export default function FarmDetailsPage() {
         
         // Return the primary UNICHAIN RPC endpoint
         try {
-            return new ethers.providers.JsonRpcProvider('https://rpc.unichain.network');
+            return new ethers.providers.JsonRpcProvider('https://mainnet.unichain.org');
         } catch (e) {
             console.error("Error connecting to primary RPC:", e);
             // Try fallback providers

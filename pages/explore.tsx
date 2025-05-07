@@ -44,7 +44,7 @@ const getTokenSymbol = async (address: string, provider: ethers.providers.Provid
 }
 
 // Use the UNICHAIN RPC directly for read-only operations
-const defaultProvider = new ethers.providers.JsonRpcProvider('https://rpc.unichain.network');
+const defaultProvider = new ethers.providers.JsonRpcProvider('https://mainnet.unichain.org');
 // Fallback providers if the main one fails
 const fallbackProviders = [
   'https://unichain-rpc.publicnode.com',

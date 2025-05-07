@@ -444,7 +444,7 @@ export default function CreateFarm() {
             
                 // Prepare final arguments array with the encoded parameters format required
                 args.push(
-                    "0x724e6425bb38473e011ea961515c65e81e2769a94ca4c3174aa97e31a057dc20", // Use the exact bytes32 hash directly
+                    "0x724e6425bb38473e011ea961515c65e81e2769a94ca4c3174aa97e31a057dc20", // Keep this exact hash - it's what's registered in the contract
                     ethers.utils.defaultAbiCoder.encode(
                         ['address', 'address', 'uint256', 'uint256'],
                         [stakeTokenAddr, rewardTokenAddr, lockDurationSeconds, fixedAPYPercent]
@@ -543,7 +543,7 @@ export default function CreateFarm() {
             
             // --- Call deployFarm with the farm type and encoded initData --- 
             // Use the specific bytes32 hash instead of formatting a string
-            const farmType = "0x724e6425bb38473e011ea961515c65e81e2769a94ca4c3174aa97e31a057dc20";
+            const farmType = "0x724e6425bb38473e011ea961515c65e81e2769a94ca4c3174aa97e31a057dc20"; // Keep this exactly as is since it's what was registered
             console.log(`Calling factory.deployFarm with farm type hash: ${farmType} (FixedAPYFarm)`);
             const txResponse = await factory.deployFarm(
                 farmType, // Use the exact bytes32 hash directly

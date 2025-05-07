@@ -19,14 +19,14 @@ const unichain = {
   nativeCurrency: {
     decimals: 18,
     name: 'UNICHAIN',
-    symbol: 'UNI',
+    symbol: 'ETH',
   },
   rpcUrls: {
-    public: { http: ['https://rpc.unichain.network'] },
-    default: { http: ['https://rpc.unichain.network'] },
+    public: { http: ['https://mainnet.unichain.org'] },
+    default: { http: ['https://mainnet.unichain.org'] },
   },
   blockExplorers: {
-    default: { name: 'UniScan', url: 'https://scan.unichain.network' },
+    default: { name: 'UniScan', url: 'https://uniscan.xyz' },
   },
 } as const;
 
@@ -36,7 +36,7 @@ const config = getDefaultConfig({
   projectId: '24d363deb599a3c2c46b3e09e7bad231',
   chains: [unichain, base, mainnet],
   transports: {
-    [unichain.id]: http('https://rpc.unichain.network'),
+    [unichain.id]: http('https://mainnet.unichain.org'),
     [base.id]: http(),
     [mainnet.id]: http(),
   },

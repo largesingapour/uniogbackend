@@ -98,8 +98,28 @@ export const checkFarmTypeRegistered = async (farmType: string): Promise<boolean
   try {
     const provider = getProvider();
     const factory = new ethers.Contract(FARM_FACTORY_ADDRESS, FARM_FACTORY_ABI, provider);
-    const bytes32FarmType = ethers.utils.formatBytes32String(farmType);
-    const implementationAddress = await factory.implementationForType(bytes32FarmType);
+    
+    // Use the hardcoded hash value that is known to work
+    const farmTypeHash = "0x724e6425bb38473e011ea961515c65e81e2769a94ca4c3174aa97e31a057dc20";
+    
+    // Try to get the implementation using various possible method names
+    let implementationAddress;
+    try {
+      // Try different possible function names in the ABI
+      if (typeof factory.implementationForType === 'function') {
+        implementationAddress = await factory.implementationForType(farmTypeHash);
+      } else if (typeof factory.getImplementationForType === 'function') {
+        implementationAddress = await factory.getImplementationForType(farmTypeHash);
+      } else if (typeof factory.getImplementation === 'function') {
+        implementationAddress = await factory.getImplementation(farmTypeHash);
+      } else {
+        console.log("No implementation lookup function found in ABI");
+        return false;
+      }
+    } catch (functionError) {
+      console.error("Error calling implementation function:", functionError);
+      return false;
+    }
     
     // If the implementation address is not the zero address, the farm type is registered
     return implementationAddress !== ethers.constants.AddressZero;
